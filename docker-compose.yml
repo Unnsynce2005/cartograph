@@ -1,0 +1,43 @@
+version: "3.9"
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: cartograph
+      POSTGRES_PASSWORD: cartograph
+      POSTGRES_DB: cartograph
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    ports:
+      - "8000:8000"
+    environment:
+      CARTOGRAPH_DATABASE_URL: "postgresql+asyncpg://cartograph:cartograph@db:5432/cartograph"
+      CARTOGRAPH_DATABASE_URL_SYNC: "postgresql://cartograph:cartograph@db:5432/cartograph"
+      CARTOGRAPH_ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+    depends_on:
+      - db
+    volumes:
+      - ./engine:/app/engine
+      - ./parser:/app/parser
+      - uploads:/tmp/cartograph
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  uploads:

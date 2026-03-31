@@ -1,0 +1,14 @@
+# Sample Next.js/React open-source repos for training
+# Add more URLs (one per line) for better model quality
+# Target: 50-100+ repos with clean directory structure
+
+https://github.com/vercel/next.js
+https://github.com/shadcn-ui/ui
+https://github.com/calcom/cal.com
+https://github.com/vercel/commerce
+https://github.com/t3-oss/create-t3-app
+https://github.com/trpc/trpc
+https://github.com/blitz-js/blitz
+https://github.com/supabase/supabase
+https://github.com/highlight/highlight
+https://github.com/documenso/documenso

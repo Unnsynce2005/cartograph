@@ -1,0 +1,28 @@
+FROM python:3.11-slim
+
+RUN apt-get update && apt-get install -y \
+    git curl && \
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y nodejs && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# install parser dependencies
+COPY parser/package.json parser/tsconfig.json /app/parser/
+RUN cd /app/parser && npm install
+
+# install python dependencies
+COPY engine/requirements.txt /app/engine/
+RUN pip install --no-cache-dir -r /app/engine/requirements.txt
+
+# copy source
+COPY parser/src /app/parser/src
+COPY engine /app/engine
+COPY backend /app/backend
+
+ENV PYTHONPATH=/app/engine:/app/backend
+ENV CARTOGRAPH_PARSER_BIN="npx --prefix /app/parser ts-node /app/parser/src/index.ts parse"
+
+EXPOSE 8000
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
