@@ -1,14 +1,20 @@
-# Sample Next.js/React open-source repos for training
-# Add more URLs (one per line) for better model quality
-# Target: 50-100+ repos with clean directory structure
-
-https://github.com/vercel/next.js
+https://github.com/vercel/commerce
 https://github.com/shadcn-ui/ui
 https://github.com/calcom/cal.com
-https://github.com/vercel/commerce
+https://github.com/documenso/documenso
+https://github.com/vercel/next-learn
+https://github.com/vercel/platforms
+https://github.com/steven-tey/dub
 https://github.com/t3-oss/create-t3-app
 https://github.com/trpc/trpc
-https://github.com/blitz-js/blitz
 https://github.com/supabase/supabase
 https://github.com/highlight/highlight
-https://github.com/documenso/documenso
+https://github.com/medusajs/nextjs-starter-medusa
+https://github.com/leerob/leerob.io
+https://github.com/vercel/ai-chatbot
+https://github.com/sadmann7/skateshop
+https://github.com/chronark/highstorm
+https://github.com/mickasmt/next-saas-stripe-starter
+https://github.com/ixahmedxi/noodle
+https://github.com/steven-tey/novel
+https://github.com/joschan21/breadit
