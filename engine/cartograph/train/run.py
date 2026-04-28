@@ -47,7 +47,7 @@ def clone_repo(url: str, dest: str) -> bool:
     """Shallow clone a repo."""
     try:
         subprocess.run(
-            ["git", "clone", "--depth", "200", url, dest],
+            ["git", "clone", "--depth", "1000", url, dest],
             capture_output=True, timeout=120, check=True,
         )
         return True
@@ -58,7 +58,7 @@ def clone_repo(url: str, dest: str) -> bool:
 
 def parse_repo(repo_dir: str, output_json: str) -> bool:
     """Run the TypeScript parser on a repo."""
-    cmd = f"{settings.parser_bin} {repo_dir} -o {output_json} --snippets"
+    cmd = f"npx --prefix /home/ty/cartograph/parser ts-node /home/ty/cartograph/parser/src/index.ts parse {repo_dir} -o {output_json} --snippets"
     try:
         result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=120)
         return result.returncode == 0
