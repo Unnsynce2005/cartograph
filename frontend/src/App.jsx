@@ -1,350 +1,513 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
-import * as d3 from 'd3'
-import { Upload, AlertTriangle, Zap, ChevronRight, X, Loader2, Shield, GitBranch, Box, ArrowLeft } from 'lucide-react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
+import {
+  Upload, AlertTriangle, ChevronRight, X, Loader2, Shield, FileCode,
+  ArrowRight, Sparkles, Copy, Check, GitBranch, Box, AlertOctagon
+} from 'lucide-react'
 import * as api from './lib/api'
 
-/* ── palette ── */
-const MODULE_COLORS = [
-  '#6366f1', '#f59e0b', '#10b981', '#ef4444',
-  '#8b5cf6', '#06b6d4', '#f97316', '#ec4899',
-  '#14b8a6', '#a855f7', '#84cc16', '#e11d48',
-]
-const KIND_SHAPE = {
-  component: d3.symbolSquare,
-  hook: d3.symbolDiamond,
-  api_route: d3.symbolTriangle,
-  page: d3.symbolStar,
-  function: d3.symbolCircle,
-  arrow_function: d3.symbolCircle,
-  class: d3.symbolCross,
-  variable: d3.symbolWye,
+const SEVERITY = {
+  critical: { color: '#dc2626', bg: 'rgba(220, 38, 38, 0.08)', border: '#7f1d1d', label: 'CRITICAL' },
+  high:     { color: '#ea580c', bg: 'rgba(234, 88, 12, 0.08)',  border: '#7c2d12', label: 'HIGH' },
+  medium:   { color: '#ca8a04', bg: 'rgba(202, 138, 4, 0.08)',  border: '#713f12', label: 'MEDIUM' },
+  low:      { color: '#737373', bg: 'rgba(115, 115, 115, 0.06)', border: '#404040', label: 'LOW' },
 }
-const SEVERITY_COLOR = { critical: '#dc2626', high: '#f59e0b', medium: '#f97316', low: '#6b7280' }
 
-/* ── styles ── */
 const STYLES = `
+  @import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@300;400;500;600&family=Inter:wght@300;400;500;600;700&display=swap');
+
   * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body, #root { height: 100%; }
   body {
-    font-family: 'DM Sans', sans-serif;
-    background: #0a0a0f;
-    color: #e4e4e7;
-    overflow: hidden;
+    font-family: 'Inter', sans-serif;
+    background: #0a0a0a;
+    color: #e8e6e3;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+    background-image:
+      radial-gradient(at 20% 0%, rgba(99, 102, 241, 0.06) 0%, transparent 50%),
+      radial-gradient(at 80% 100%, rgba(245, 158, 11, 0.04) 0%, transparent 50%);
   }
+  .serif { font-family: 'Instrument Serif', serif; font-style: italic; }
   .mono { font-family: 'JetBrains Mono', monospace; }
-  .app { display: flex; height: 100vh; width: 100vw; }
-  .sidebar {
-    width: 340px;
-    background: #111118;
-    border-right: 1px solid #1e1e2a;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    flex-shrink: 0;
-  }
-  .sidebar-header {
-    padding: 20px 20px 16px;
-    border-bottom: 1px solid #1e1e2a;
-  }
-  .sidebar-header h1 {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 18px;
-    font-weight: 600;
-    letter-spacing: -0.5px;
-    color: #f4f4f5;
-  }
-  .sidebar-header .sub {
-    font-size: 11px;
-    color: #52525b;
-    margin-top: 2px;
-    font-family: 'JetBrains Mono', monospace;
-  }
-  .sidebar-body { flex: 1; overflow-y: auto; padding: 12px; }
-  .main { flex: 1; position: relative; overflow: hidden; }
-  .graph-canvas { width: 100%; height: 100%; background: #0a0a0f; }
 
-  /* upload */
-  .upload-overlay {
-    position: absolute; inset: 0;
-    display: flex; align-items: center; justify-content: center;
-    background: #0a0a0f;
-    z-index: 50;
-  }
-  .drop-zone {
-    width: 460px;
-    border: 2px dashed #27272a;
-    border-radius: 16px;
-    padding: 48px 32px;
-    text-align: center;
-    cursor: pointer;
-    transition: all 0.2s;
-  }
-  .drop-zone:hover, .drop-zone.drag-over {
-    border-color: #6366f1;
-    background: rgba(99, 102, 241, 0.04);
-  }
-  .drop-zone h2 { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
-  .drop-zone p { font-size: 13px; color: #71717a; line-height: 1.5; }
-  .drop-zone .icon { margin-bottom: 16px; color: #3f3f46; }
+  /* page wrapper */
+  .page { min-height: 100vh; max-width: 1200px; margin: 0 auto; padding: 64px 48px; }
 
-  /* loading */
-  .loading-overlay {
-    position: absolute; inset: 0;
-    display: flex; flex-direction: column;
-    align-items: center; justify-content: center;
-    background: #0a0a0f; z-index: 50;
+  /* header */
+  .header { margin-bottom: 64px; display: flex; justify-content: space-between; align-items: flex-end; }
+  .brand .name {
+    font-family: 'Instrument Serif', serif;
+    font-size: 56px;
+    line-height: 1;
+    color: #f5f3f0;
+    letter-spacing: -1px;
   }
-  .loading-overlay .spinner { animation: spin 1s linear infinite; color: #6366f1; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  .loading-overlay p { margin-top: 16px; font-size: 14px; color: #a1a1aa; }
-
-  /* module list */
-  .module-item {
-    padding: 10px 12px;
-    border-radius: 8px;
-    cursor: pointer;
-    margin-bottom: 4px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    transition: background 0.15s;
-    font-size: 13px;
-  }
-  .module-item:hover { background: #18181f; }
-  .module-item.active { background: #1e1e2e; }
-  .module-dot {
-    width: 10px; height: 10px;
-    border-radius: 2px;
-    flex-shrink: 0;
-  }
-  .module-count {
-    margin-left: auto;
+  .brand .name .accent { font-style: italic; color: #fbbf24; }
+  .brand .tagline {
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
-    color: #52525b;
+    text-transform: uppercase;
+    letter-spacing: 2.5px;
+    color: #737373;
+    margin-top: 8px;
   }
-
-  /* risk list */
-  .risk-item {
-    padding: 8px 12px;
-    border-radius: 6px;
-    margin-bottom: 4px;
-    font-size: 12px;
-    border-left: 3px solid;
-    background: #111118;
-    cursor: pointer;
-  }
-  .risk-item:hover { background: #18181f; }
-  .risk-title { font-weight: 500; margin-bottom: 2px; }
-  .risk-sev {
+  .header-meta {
     font-family: 'JetBrains Mono', monospace;
     font-size: 10px;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 2px;
+    color: #525252;
+    text-align: right;
+  }
+  .header-meta .ver { color: #737373; margin-bottom: 4px; }
+
+  /* upload */
+  .upload-zone {
+    margin-top: 80px;
+    padding: 80px 48px;
+    border: 1px dashed #262626;
+    border-radius: 2px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    background: rgba(20, 20, 20, 0.3);
+  }
+  .upload-zone:hover, .upload-zone.drag {
+    border-color: #fbbf24;
+    background: rgba(251, 191, 36, 0.02);
+  }
+  .upload-zone .upload-icon {
+    width: 48px; height: 48px;
+    border: 1px solid #404040;
+    border-radius: 2px;
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 24px;
+    color: #737373;
+    transition: all 0.3s;
+  }
+  .upload-zone:hover .upload-icon, .upload-zone.drag .upload-icon {
+    border-color: #fbbf24; color: #fbbf24;
+  }
+  .upload-zone h2 {
+    font-family: 'Instrument Serif', serif;
+    font-size: 32px; font-weight: 400; color: #f5f3f0;
+    margin-bottom: 12px;
+  }
+  .upload-zone p { font-size: 14px; color: #a3a3a3; line-height: 1.6; max-width: 420px; margin: 0 auto; }
+  .upload-zone .hint {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; text-transform: uppercase; letter-spacing: 2px;
+    color: #525252; margin-top: 16px;
   }
 
-  /* detail panel */
-  .detail-panel {
-    position: absolute;
-    top: 0; right: 0;
-    width: 380px; height: 100%;
-    background: #111118;
-    border-left: 1px solid #1e1e2a;
-    z-index: 40;
-    display: flex;
-    flex-direction: column;
-    animation: slideIn 0.2s ease-out;
+  /* loading */
+  .loading {
+    margin-top: 80px;
+    padding: 64px;
+    text-align: center;
+    border: 1px solid #1f1f1f;
+    border-radius: 2px;
   }
-  @keyframes slideIn { from { transform: translateX(100%); } }
-  .detail-header {
-    padding: 16px 20px;
-    border-bottom: 1px solid #1e1e2a;
-    display: flex;
-    align-items: center;
-    gap: 12px;
+  .loading h2 {
+    font-family: 'Instrument Serif', serif;
+    font-size: 28px; color: #f5f3f0; margin-bottom: 12px;
   }
-  .detail-header h3 { font-size: 15px; font-weight: 600; flex: 1; }
-  .detail-close {
-    background: none; border: none; color: #71717a;
-    cursor: pointer; padding: 4px;
-  }
-  .detail-close:hover { color: #e4e4e7; }
-  .detail-body { flex: 1; overflow-y: auto; padding: 16px 20px; }
-  .detail-section { margin-bottom: 20px; }
-  .detail-section h4 {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    color: #52525b;
-    margin-bottom: 8px;
+  .loading p { color: #a3a3a3; font-size: 14px; }
+  .loading .pipeline {
+    margin-top: 32px;
+    display: flex; gap: 0; justify-content: center;
     font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; text-transform: uppercase; letter-spacing: 2px;
+    color: #525252;
   }
-  .detail-row {
+  .loading .pipeline span { padding: 0 12px; }
+  .loading .pipeline span:not(:last-child)::after {
+    content: '→'; margin-left: 24px; color: #404040;
+  }
+  .loading .pipeline span.active { color: #fbbf24; }
+  .spin { animation: spin 1.2s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* blueprint header */
+  .bp-header {
     display: flex;
     justify-content: space-between;
-    font-size: 13px;
-    padding: 4px 0;
+    align-items: flex-start;
+    margin-bottom: 48px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid #1f1f1f;
   }
-  .detail-row .label { color: #71717a; }
-  .detail-row .value { font-family: 'JetBrains Mono', monospace; font-size: 12px; }
-
-  /* impact results */
-  .impact-node {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 10px;
-    border-radius: 6px;
-    margin-bottom: 4px;
-    font-size: 12px;
-    background: #0f0f17;
+  .bp-title {
+    font-family: 'Instrument Serif', serif;
+    font-size: 48px; line-height: 1.1; color: #f5f3f0;
+    letter-spacing: -1px;
   }
-  .impact-bar {
-    height: 4px;
-    border-radius: 2px;
-    background: #6366f1;
-    transition: width 0.3s;
-  }
-  .impact-prob {
+  .bp-overview { font-size: 15px; color: #a3a3a3; max-width: 520px; margin-top: 8px; line-height: 1.6; }
+  .bp-stats { display: flex; gap: 32px; }
+  .bp-stat { text-align: right; }
+  .bp-stat .num { font-family: 'Instrument Serif', serif; font-size: 32px; color: #f5f3f0; line-height: 1; }
+  .bp-stat .lbl {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    margin-left: auto;
-    flex-shrink: 0;
+    font-size: 9px; text-transform: uppercase; letter-spacing: 2.5px;
+    color: #525252; margin-top: 4px;
   }
-
-  /* breadcrumb */
-  .breadcrumb {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 8px 12px;
-    font-size: 12px;
-    color: #71717a;
-    border-bottom: 1px solid #1e1e2a;
-    font-family: 'JetBrains Mono', monospace;
-  }
-  .breadcrumb span { cursor: pointer; }
-  .breadcrumb span:hover { color: #e4e4e7; }
-  .breadcrumb .current { color: #e4e4e7; cursor: default; }
-
-  /* stats bar */
-  .stats-bar {
-    display: flex;
-    gap: 16px;
-    padding: 10px 20px;
-    border-bottom: 1px solid #1e1e2a;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    color: #52525b;
-  }
-  .stat-val { color: #a1a1aa; margin-left: 4px; }
 
   /* section header */
-  .section-head {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    color: #52525b;
-    padding: 12px 0 8px;
+  .section-h {
+    display: flex; align-items: baseline; gap: 16px; margin-bottom: 24px;
+  }
+  .section-h h3 {
+    font-family: 'Instrument Serif', serif;
+    font-size: 24px; color: #f5f3f0; font-weight: 400;
+  }
+  .section-h .count {
     font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: #525252;
   }
+  .section-h .line { flex: 1; height: 1px; background: #1f1f1f; }
 
-  /* impact button */
-  .btn-impact {
-    display: flex; align-items: center; gap: 6px;
-    padding: 7px 12px;
-    background: rgba(99, 102, 241, 0.1);
-    border: 1px solid rgba(99, 102, 241, 0.3);
-    border-radius: 6px;
-    color: #818cf8;
-    font-size: 12px;
+  /* card grid */
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+    gap: 16px;
+    margin-bottom: 64px;
+  }
+  .card {
+    background: #111111;
+    border: 1px solid #1f1f1f;
+    border-radius: 2px;
+    padding: 28px;
     cursor: pointer;
-    transition: all 0.15s;
-    font-family: 'DM Sans', sans-serif;
-    margin-top: 8px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
   }
-  .btn-impact:hover {
-    background: rgba(99, 102, 241, 0.2);
-    border-color: #6366f1;
+  .card::before {
+    content: '';
+    position: absolute; top: 0; left: 0; bottom: 0;
+    width: 3px;
+    background: var(--accent);
+    transition: width 0.3s ease;
+  }
+  .card:hover {
+    border-color: #404040;
+    background: #161616;
+    transform: translateY(-2px);
+  }
+  .card:hover::before { width: 5px; }
+  .card-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; color: #525252;
+    margin-bottom: 8px;
+    text-transform: uppercase; letter-spacing: 2px;
+  }
+  .card-title {
+    font-family: 'Instrument Serif', serif;
+    font-size: 28px; color: #f5f3f0;
+    line-height: 1.1; margin-bottom: 12px;
+    font-weight: 400;
+  }
+  .card-summary {
+    font-size: 14px; color: #d4d4d4;
+    line-height: 1.6;
+    margin-bottom: 20px;
+    min-height: 44px;
+  }
+  .card-meta {
+    display: flex; gap: 16px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; color: #737373;
+    text-transform: uppercase; letter-spacing: 1.5px;
+    padding-top: 16px;
+    border-top: 1px solid #1f1f1f;
+  }
+  .card-meta .num { color: #f5f3f0; }
+  .card-risk-pill {
+    position: absolute; top: 20px; right: 20px;
+    padding: 4px 8px;
+    background: var(--risk-bg);
+    border: 1px solid var(--risk-border);
+    border-radius: 2px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: var(--risk-color);
+    letter-spacing: 1.5px;
+    display: flex; align-items: center; gap: 4px;
   }
 
-  /* tooltip */
-  .tooltip {
-    position: absolute;
-    pointer-events: none;
-    background: #1e1e2e;
-    border: 1px solid #2e2e3e;
-    border-radius: 8px;
-    padding: 10px 14px;
-    font-size: 12px;
+  /* detail */
+  .detail-overlay {
+    position: fixed; inset: 0;
+    background: rgba(10, 10, 10, 0.85);
+    backdrop-filter: blur(8px);
     z-index: 100;
-    max-width: 280px;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    display: flex; justify-content: center; align-items: flex-start;
+    padding: 64px 32px;
+    overflow-y: auto;
+    animation: fade-in 0.2s ease-out;
   }
-  .tooltip .tt-name { font-weight: 600; font-size: 13px; margin-bottom: 2px; }
-  .tooltip .tt-kind { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #6366f1; }
-  .tooltip .tt-file { font-size: 11px; color: #71717a; margin-top: 4px; }
+  @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+  .detail-card {
+    background: #0f0f0f;
+    border: 1px solid #2a2a2a;
+    border-radius: 2px;
+    width: 100%;
+    max-width: 800px;
+    padding: 48px;
+    position: relative;
+    animation: slide-up 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  @keyframes slide-up {
+    from { transform: translateY(20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+  .detail-close {
+    position: absolute; top: 24px; right: 24px;
+    background: none; border: 1px solid #2a2a2a;
+    color: #737373; padding: 6px; cursor: pointer;
+    border-radius: 2px;
+    transition: all 0.2s;
+  }
+  .detail-close:hover { border-color: #fbbf24; color: #fbbf24; }
+  .detail-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: var(--accent);
+    text-transform: uppercase; letter-spacing: 2.5px;
+  }
+  .detail-title {
+    font-family: 'Instrument Serif', serif;
+    font-size: 56px; color: #f5f3f0;
+    line-height: 1; margin: 8px 0 16px;
+    font-weight: 400; letter-spacing: -1.5px;
+  }
+  .detail-summary { font-size: 17px; color: #d4d4d4; line-height: 1.6; margin-bottom: 32px; max-width: 600px; }
+  .detail-section { margin-bottom: 32px; }
+  .detail-section h4 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; color: #525252;
+    text-transform: uppercase; letter-spacing: 2.5px;
+    margin-bottom: 12px;
+  }
+  .detail-section p { color: #a3a3a3; line-height: 1.7; font-size: 14px; }
 
-  /* tab bar */
-  .tab-bar {
-    display: flex;
-    border-bottom: 1px solid #1e1e2a;
+  /* file list */
+  .file-list {
+    display: flex; flex-direction: column;
+    border-top: 1px solid #1f1f1f;
   }
-  .tab {
-    flex: 1;
-    padding: 10px;
-    text-align: center;
-    font-size: 12px;
-    font-weight: 500;
+  .file-list .file {
+    padding: 10px 0;
+    border-bottom: 1px solid #1f1f1f;
+    display: flex; align-items: center; gap: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px; color: #a3a3a3;
+  }
+  .file-list .file svg { color: #525252; flex-shrink: 0; }
+
+  /* connections */
+  .connections-list { display: flex; flex-direction: column; gap: 8px; }
+  .connection {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 16px;
+    background: #161616;
+    border: 1px solid #1f1f1f;
+    border-radius: 2px;
     cursor: pointer;
-    border-bottom: 2px solid transparent;
-    color: #71717a;
-    transition: all 0.15s;
+    transition: all 0.2s;
   }
-  .tab:hover { color: #a1a1aa; }
-  .tab.active { color: #e4e4e7; border-bottom-color: #6366f1; }
+  .connection:hover { border-color: #404040; background: #1a1a1a; }
+  .connection-name { font-size: 14px; color: #d4d4d4; display: flex; align-items: center; gap: 8px; }
+  .connection-strength {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; color: #737373;
+    text-transform: uppercase; letter-spacing: 1.5px;
+  }
+
+  /* risks */
+  .risk-list { display: flex; flex-direction: column; gap: 8px; }
+  .risk-item {
+    padding: 14px 16px;
+    background: var(--risk-bg);
+    border: 1px solid var(--risk-border);
+    border-radius: 2px;
+    border-left: 3px solid var(--risk-color);
+  }
+  .risk-item .risk-head {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 6px;
+  }
+  .risk-item .risk-title { font-size: 13px; color: #e8e6e3; font-weight: 500; }
+  .risk-item .risk-sev {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px; letter-spacing: 1.5px; color: var(--risk-color);
+  }
+  .risk-item .risk-explain { font-size: 12px; color: #a3a3a3; line-height: 1.5; }
+
+  /* improve form */
+  .improve-form { margin-top: 16px; }
+  .improve-form input {
+    width: 100%;
+    background: #161616;
+    border: 1px solid #2a2a2a;
+    border-radius: 2px;
+    padding: 12px 16px;
+    color: #f5f3f0;
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    transition: border 0.2s;
+  }
+  .improve-form input:focus { outline: none; border-color: #fbbf24; }
+  .improve-form input::placeholder { color: #525252; }
+  .btn {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 16px;
+    background: #161616;
+    border: 1px solid #2a2a2a;
+    border-radius: 2px;
+    color: #d4d4d4;
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-top: 12px;
+  }
+  .btn:hover { border-color: #fbbf24; color: #fbbf24; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn.primary {
+    background: #fbbf24;
+    border-color: #fbbf24;
+    color: #0a0a0a;
+    font-weight: 500;
+  }
+  .btn.primary:hover { background: #f59e0b; border-color: #f59e0b; color: #0a0a0a; }
+
+  /* prompt result */
+  .prompt-result { margin-top: 24px; }
+  .prompt-summary {
+    padding: 16px;
+    background: rgba(251, 191, 36, 0.05);
+    border: 1px solid rgba(251, 191, 36, 0.2);
+    border-radius: 2px;
+    font-size: 14px; color: #fbbf24; line-height: 1.5;
+    margin-bottom: 16px;
+  }
+  .prompt-cascade { margin-bottom: 16px; }
+  .cascade-item {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 12px;
+    border-bottom: 1px solid #1f1f1f;
+    font-size: 13px;
+  }
+  .cascade-bar {
+    height: 3px;
+    background: var(--prob-color);
+    border-radius: 1px;
+    margin-top: 4px;
+  }
+  .cascade-name { color: #d4d4d4; flex: 1; }
+  .cascade-prob {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: var(--prob-color);
+    margin-left: 12px;
+  }
+  .prompt-box {
+    background: #060606;
+    border: 1px solid #1f1f1f;
+    border-radius: 2px;
+    padding: 20px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: #d4d4d4;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 400px;
+    overflow-y: auto;
+    position: relative;
+  }
+  .copy-btn {
+    position: absolute; top: 12px; right: 12px;
+    background: #1a1a1a; border: 1px solid #2a2a2a;
+    padding: 6px 10px; border-radius: 2px;
+    color: #a3a3a3; cursor: pointer;
+    font-size: 11px; display: flex; align-items: center; gap: 6px;
+    transition: all 0.2s;
+  }
+  .copy-btn:hover { border-color: #fbbf24; color: #fbbf24; }
+
+  /* error */
+  .err-box {
+    padding: 32px; border: 1px solid #7f1d1d;
+    background: rgba(220, 38, 38, 0.05);
+    border-radius: 2px; margin-top: 80px; text-align: center;
+  }
+
+  /* scrollbar */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #3a3a3a; }
 `
 
-export default function App() {
-  const [analysis, setAnalysis] = useState(null)
-  const [analysisId, setAnalysisId] = useState(null)
-  const [status, setStatus] = useState('idle') // idle | uploading | analyzing | done | error
-  const [error, setError] = useState(null)
-  const [selectedNode, setSelectedNode] = useState(null)
-  const [selectedModule, setSelectedModule] = useState(null)
-  const [impactResults, setImpactResults] = useState(null)
-  const [impactLoading, setImpactLoading] = useState(false)
-  const [tab, setTab] = useState('modules') // modules | risks
-  const [tooltip, setTooltip] = useState(null)
-  const [zoomPath, setZoomPath] = useState([]) // breadcrumb trail
-  const [highlightedNodes, setHighlightedNodes] = useState(new Set())
-  const svgRef = useRef(null)
-  const simRef = useRef(null)
+const ACCENT_COLORS = [
+  '#fbbf24', '#a3e635', '#34d399', '#22d3ee',
+  '#a78bfa', '#f472b6', '#fb923c', '#facc15',
+  '#4ade80', '#60a5fa', '#c084fc', '#f87171',
+]
 
-  // poll for analysis status
+function colorForModule(id) {
+  return ACCENT_COLORS[id % ACCENT_COLORS.length]
+}
+
+function topRiskSeverity(risks) {
+  if (!risks || risks.length === 0) return null
+  const order = ['critical', 'high', 'medium', 'low']
+  for (const sev of order) {
+    if (risks.find(r => r.severity === sev)) return sev
+  }
+  return null
+}
+
+export default function App() {
+  const [status, setStatus] = useState('idle')
+  const [analysisId, setAnalysisId] = useState(null)
+  const [blueprint, setBlueprint] = useState(null)
+  const [error, setError] = useState(null)
+  const [selectedCard, setSelectedCard] = useState(null)
+  const [pipelineStage, setPipelineStage] = useState(0)
+
+  // poll for status
   useEffect(() => {
     if (!analysisId || status !== 'analyzing') return
-    const interval = setInterval(async () => {
+
+    let stage = 0
+    const stageInterval = setInterval(() => {
+      stage = (stage + 1) % 5
+      setPipelineStage(stage)
+    }, 1500)
+
+    const poll = setInterval(async () => {
       try {
-        const res = await api.getStatus(analysisId)
-        if (res.status === 'done') {
-          const full = await api.getAnalysis(analysisId)
-          setAnalysis(full)
+        const s = await api.getStatus(analysisId)
+        if (s.status === 'done') {
+          clearInterval(poll)
+          clearInterval(stageInterval)
+          const bp = await fetch(`/api/blueprint/${analysisId}`).then(r => r.json())
+          setBlueprint(bp)
           setStatus('done')
-        } else if (res.status === 'error') {
+        } else if (s.status === 'error') {
+          clearInterval(poll)
+          clearInterval(stageInterval)
           setStatus('error')
           setError('Analysis failed')
         }
-      } catch (e) {
-        console.error(e)
-      }
+      } catch (e) { console.error(e) }
     }, 1000)
-    return () => clearInterval(interval)
+
+    return () => { clearInterval(poll); clearInterval(stageInterval) }
   }, [analysisId, status])
 
-  // handle file upload
   const handleUpload = useCallback(async (file) => {
     setStatus('uploading')
     setError(null)
@@ -358,504 +521,376 @@ export default function App() {
     }
   }, [])
 
-  // handle impact prediction
-  const handlePredictImpact = useCallback(async (nodeId) => {
-    if (!analysisId) return
-    setImpactLoading(true)
-    try {
-      const res = await api.predictImpact(analysisId, nodeId)
-      setImpactResults(res)
-      setHighlightedNodes(new Set(res.affected_nodes.map(n => n.node_id)))
-    } catch (e) {
-      console.error('Impact prediction failed:', e)
-    } finally {
-      setImpactLoading(false)
-    }
-  }, [analysisId])
-
-  // clear impact
-  const clearImpact = useCallback(() => {
-    setImpactResults(null)
-    setHighlightedNodes(new Set())
-  }, [])
+  const reset = () => {
+    setStatus('idle')
+    setAnalysisId(null)
+    setBlueprint(null)
+    setSelectedCard(null)
+    setError(null)
+  }
 
   return (
     <>
       <style>{STYLES}</style>
-      <div className="app">
-        {/* left sidebar */}
-        <div className="sidebar">
-          <div className="sidebar-header">
-            <h1>Cartograph</h1>
-            <div className="sub">code x-ray engine</div>
+      <div className="page">
+        <header className="header">
+          <div className="brand">
+            <div className="name">Carto<span className="accent">graph</span></div>
+            <div className="tagline">— Code X-Ray Engine —</div>
           </div>
-
-          {analysis && (
-            <>
-              <div className="stats-bar">
-                <span>nodes<span className="stat-val">{analysis.total_nodes}</span></span>
-                <span>edges<span className="stat-val">{analysis.total_edges}</span></span>
-                <span>modules<span className="stat-val">{analysis.modules?.length || 0}</span></span>
-                <span>risks<span className="stat-val">{analysis.risks?.length || 0}</span></span>
-              </div>
-
-              <div className="tab-bar">
-                <div className={`tab ${tab === 'modules' ? 'active' : ''}`} onClick={() => setTab('modules')}>
-                  <Box size={12} style={{ display: 'inline', marginRight: 4, verticalAlign: -1 }} />
-                  Modules
-                </div>
-                <div className={`tab ${tab === 'risks' ? 'active' : ''}`} onClick={() => setTab('risks')}>
-                  <Shield size={12} style={{ display: 'inline', marginRight: 4, verticalAlign: -1 }} />
-                  Risks
-                  {analysis.risks?.length > 0 && (
-                    <span style={{ marginLeft: 4, color: '#f59e0b', fontSize: 10 }}>
-                      {analysis.risks.length}
-                    </span>
-                  )}
-                </div>
-              </div>
-            </>
-          )}
-
-          <div className="sidebar-body">
-            {analysis && tab === 'modules' && (
-              <>
-                <div className="section-head"><Box size={12} /> discovered modules</div>
-                {analysis.modules?.map((mod, i) => (
-                  <div
-                    key={mod.id}
-                    className={`module-item ${selectedModule === mod.id ? 'active' : ''}`}
-                    onClick={() => {
-                      setSelectedModule(selectedModule === mod.id ? null : mod.id)
-                      setSelectedNode(null)
-                      clearImpact()
-                    }}
-                  >
-                    <div className="module-dot" style={{ background: MODULE_COLORS[i % MODULE_COLORS.length] }} />
-                    <span>{mod.name}</span>
-                    <span className="module-count">{mod.node_count}</span>
-                  </div>
-                ))}
-              </>
-            )}
-
-            {analysis && tab === 'risks' && (
-              <>
-                <div className="section-head"><AlertTriangle size={12} /> detected risks</div>
-                {analysis.risks?.length === 0 && (
-                  <p style={{ fontSize: 13, color: '#52525b', padding: '8px 0' }}>No risks detected.</p>
-                )}
-                {analysis.risks?.map((risk, i) => (
-                  <div
-                    key={i}
-                    className="risk-item"
-                    style={{ borderColor: SEVERITY_COLOR[risk.severity] || '#6b7280' }}
-                    onClick={() => {
-                      if (risk.affected_node_ids?.[0]) {
-                        const node = analysis.graph_nodes?.find(n => n.id === risk.affected_node_ids[0])
-                        if (node) setSelectedNode(node)
-                      }
-                    }}
-                  >
-                    <div className="risk-title">{risk.title}</div>
-                    <div className="risk-sev" style={{ color: SEVERITY_COLOR[risk.severity] }}>
-                      {risk.severity}
-                    </div>
-                  </div>
-                ))}
-              </>
-            )}
+          <div className="header-meta">
+            <div className="ver">v0.2 · gnn-powered</div>
+            <div>
+              {status === 'done' && blueprint
+                ? `${blueprint.cards?.length || 0} modules · ${blueprint.total_risks} risks`
+                : status === 'idle' ? 'awaiting input' : 'processing'}
+            </div>
           </div>
-        </div>
+        </header>
 
-        {/* main area */}
-        <div className="main">
-          {status === 'idle' && <UploadOverlay onUpload={handleUpload} />}
-          {(status === 'uploading' || status === 'analyzing') && <LoadingOverlay status={status} />}
-          {status === 'error' && <ErrorOverlay error={error} onRetry={() => setStatus('idle')} />}
+        {status === 'idle' && <UploadZone onUpload={handleUpload} />}
+        {(status === 'uploading' || status === 'analyzing') && <Loading stage={pipelineStage} />}
+        {status === 'error' && <ErrorBox error={error} onRetry={reset} />}
+        {status === 'done' && blueprint && (
+          <Blueprint
+            data={blueprint}
+            onSelectCard={setSelectedCard}
+            onReset={reset}
+          />
+        )}
 
-          {status === 'done' && analysis && (
-            <GraphView
-              ref={svgRef}
-              simRef={simRef}
-              nodes={analysis.graph_nodes || []}
-              edges={analysis.graph_edges || []}
-              modules={analysis.modules || []}
-              selectedModule={selectedModule}
-              selectedNode={selectedNode}
-              highlightedNodes={highlightedNodes}
-              impactSource={impactResults?.modified_node_id}
-              onSelectNode={(node) => {
-                setSelectedNode(node)
-                clearImpact()
-              }}
-              onTooltip={setTooltip}
-            />
-          )}
-
-          {tooltip && (
-            <div className="tooltip" style={{ left: tooltip.x + 16, top: tooltip.y - 10 }}>
-              <div className="tt-name">{tooltip.name}</div>
-              <div className="tt-kind">{tooltip.kind}</div>
-              <div className="tt-file">{tooltip.filePath}</div>
-            </div>
-          )}
-
-          {/* detail panel */}
-          {selectedNode && (
-            <div className="detail-panel">
-              <div className="detail-header">
-                <div style={{
-                  width: 8, height: 8, borderRadius: 2,
-                  background: MODULE_COLORS[selectedNode.moduleId % MODULE_COLORS.length] || '#6b7280'
-                }} />
-                <h3 className="mono">{selectedNode.name}</h3>
-                <button className="detail-close" onClick={() => { setSelectedNode(null); clearImpact() }}>
-                  <X size={16} />
-                </button>
-              </div>
-              <div className="detail-body">
-                <div className="detail-section">
-                  <h4>identity</h4>
-                  <div className="detail-row"><span className="label">Kind</span><span className="value">{selectedNode.kind}</span></div>
-                  <div className="detail-row"><span className="label">File</span><span className="value">{selectedNode.filePath}</span></div>
-                  <div className="detail-row"><span className="label">Lines</span><span className="value">{selectedNode.startLine}–{selectedNode.endLine}</span></div>
-                  <div className="detail-row"><span className="label">Module</span><span className="value">
-                    {analysis?.modules?.find(m => m.id === selectedNode.moduleId)?.name || 'Unknown'}
-                  </span></div>
-                </div>
-
-                <div className="detail-section">
-                  <h4>features</h4>
-                  <div className="detail-row"><span className="label">LOC</span><span className="value">{selectedNode.features?.loc || 0}</span></div>
-                  <div className="detail-row"><span className="label">Complexity</span><span className="value">{selectedNode.features?.cyclomaticComplexity || 0}</span></div>
-                  <div className="detail-row"><span className="label">Params</span><span className="value">{selectedNode.features?.paramCount || 0}</span></div>
-                  <div className="detail-row"><span className="label">Async</span><span className="value">{selectedNode.features?.hasAwait ? 'Yes' : 'No'}</span></div>
-                  <div className="detail-row"><span className="label">JSX</span><span className="value">{selectedNode.features?.hasJSX ? 'Yes' : 'No'}</span></div>
-                </div>
-
-                {selectedNode.risks?.length > 0 && (
-                  <div className="detail-section">
-                    <h4>risks</h4>
-                    {selectedNode.risks.map((r, i) => (
-                      <div key={i} className="risk-item" style={{ borderColor: SEVERITY_COLOR[r.severity] }}>
-                        <div className="risk-title">{r.title}</div>
-                        <div className="risk-sev" style={{ color: SEVERITY_COLOR[r.severity] }}>{r.severity}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <div className="detail-section">
-                  <h4>impact prediction</h4>
-                  <button
-                    className="btn-impact"
-                    onClick={() => handlePredictImpact(selectedNode.id)}
-                    disabled={impactLoading}
-                  >
-                    {impactLoading ? <Loader2 size={14} className="spinner" /> : <Zap size={14} />}
-                    {impactLoading ? 'Predicting...' : 'What breaks if I change this?'}
-                  </button>
-
-                  {impactResults && impactResults.modified_node_id === selectedNode.id && (
-                    <div style={{ marginTop: 12 }}>
-                      {impactResults.affected_nodes.map((n, i) => (
-                        <div key={i} className="impact-node">
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontWeight: 500, marginBottom: 2 }}>{n.name}</div>
-                            <div style={{ fontSize: 10, color: '#6366f1' }} className="mono">{n.kind}</div>
-                            <div className="impact-bar" style={{ width: `${n.impact_probability * 100}%`, marginTop: 4 }} />
-                          </div>
-                          <div className="impact-prob" style={{
-                            color: n.impact_probability > 0.7 ? '#ef4444' :
-                                   n.impact_probability > 0.4 ? '#f59e0b' : '#52525b'
-                          }}>
-                            {(n.impact_probability * 100).toFixed(0)}%
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
+        {selectedCard && (
+          <CardDetail
+            card={selectedCard}
+            analysisId={analysisId}
+            allCards={blueprint?.cards || []}
+            onClose={() => setSelectedCard(null)}
+            onSelectOther={setSelectedCard}
+          />
+        )}
       </div>
     </>
   )
 }
 
 
-/* ── Upload Overlay ── */
-function UploadOverlay({ onUpload }) {
-  const [dragOver, setDragOver] = useState(false)
-  const inputRef = useRef(null)
+function UploadZone({ onUpload }) {
+  const [drag, setDrag] = useState(false)
+  const inputRef = useRef()
 
   const handleDrop = (e) => {
     e.preventDefault()
-    setDragOver(false)
+    setDrag(false)
     const file = e.dataTransfer.files[0]
     if (file) onUpload(file)
   }
 
   return (
-    <div className="upload-overlay">
-      <div
-        className={`drop-zone ${dragOver ? 'drag-over' : ''}`}
-        onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={handleDrop}
-        onClick={() => inputRef.current?.click()}
-      >
-        <div className="icon"><Upload size={40} /></div>
-        <h2>Drop your project here</h2>
-        <p>
-          Upload a .zip of your Next.js / React / TypeScript project.
-          <br />Cartograph will X-ray its architecture with graph neural networks.
-        </p>
-        <input
-          ref={inputRef}
-          type="file"
-          accept=".zip"
-          style={{ display: 'none' }}
-          onChange={(e) => e.target.files[0] && onUpload(e.target.files[0])}
-        />
-      </div>
-    </div>
-  )
-}
-
-
-/* ── Loading Overlay ── */
-function LoadingOverlay({ status }) {
-  return (
-    <div className="loading-overlay">
-      <Loader2 size={36} className="spinner" />
-      <p>{status === 'uploading' ? 'Uploading project...' : 'Analyzing codebase with GNN...'}</p>
-      <p style={{ fontSize: 12, color: '#52525b', marginTop: 4 }}>
-        {status === 'analyzing' && 'Parsing AST → building graph → running GraphSAGE → detecting risks'}
+    <div
+      className={`upload-zone ${drag ? 'drag' : ''}`}
+      onDragOver={(e) => { e.preventDefault(); setDrag(true) }}
+      onDragLeave={() => setDrag(false)}
+      onDrop={handleDrop}
+      onClick={() => inputRef.current?.click()}
+    >
+      <div className="upload-icon"><Upload size={24} strokeWidth={1.5} /></div>
+      <h2>Drop your project</h2>
+      <p>
+        Upload a <span className="mono" style={{ color: '#fbbf24' }}>.zip</span> of any
+        Next.js, React, or TypeScript project. Cartograph will read it the way an
+        architect reads a blueprint — finding the rooms, the wiring, the load-bearing walls.
       </p>
+      <div className="hint">— supports projects up to 500 files —</div>
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".zip"
+        style={{ display: 'none' }}
+        onChange={(e) => e.target.files[0] && onUpload(e.target.files[0])}
+      />
     </div>
   )
 }
 
-
-/* ── Error Overlay ── */
-function ErrorOverlay({ error, onRetry }) {
+function Loading({ stage }) {
+  const stages = ['parse', 'embed', 'cluster', 'detect', 'describe']
   return (
-    <div className="upload-overlay">
-      <div className="drop-zone" onClick={onRetry}>
-        <div className="icon" style={{ color: '#ef4444' }}><AlertTriangle size={40} /></div>
-        <h2>Analysis failed</h2>
-        <p style={{ color: '#ef4444' }}>{error}</p>
-        <p style={{ marginTop: 12 }}>Click to try again</p>
+    <div className="loading">
+      <Loader2 size={32} className="spin" style={{ color: '#fbbf24', marginBottom: 24 }} strokeWidth={1.5} />
+      <h2>Reading your codebase</h2>
+      <p>Building the graph, finding the modules, flagging the risks.</p>
+      <div className="pipeline">
+        {stages.map((s, i) => (
+          <span key={s} className={i === stage ? 'active' : ''}>{s}</span>
+        ))}
       </div>
     </div>
   )
 }
 
+function ErrorBox({ error, onRetry }) {
+  return (
+    <div className="err-box">
+      <AlertOctagon size={32} style={{ color: '#dc2626', marginBottom: 16 }} />
+      <h2 className="serif" style={{ fontSize: 28, marginBottom: 12 }}>Analysis failed</h2>
+      <p style={{ color: '#a3a3a3', marginBottom: 24 }}>{error}</p>
+      <button className="btn" onClick={onRetry}>Try again</button>
+    </div>
+  )
+}
 
-/* ── Graph View (D3 force-directed) ── */
-const GraphView = React.forwardRef(function GraphView(
-  { nodes, edges, modules, selectedModule, selectedNode, highlightedNodes, impactSource, onSelectNode, onTooltip },
-  svgRef
-) {
-  const containerRef = useRef(null)
-  const simRef = useRef(null)
+function Blueprint({ data, onSelectCard, onReset }) {
+  return (
+    <>
+      <div className="bp-header">
+        <div>
+          <div className="bp-title">{data.project_name}</div>
+          <div className="bp-overview">{data.overview}</div>
+        </div>
+        <div className="bp-stats">
+          <div className="bp-stat">
+            <div className="num">{data.cards?.length || 0}</div>
+            <div className="lbl">modules</div>
+          </div>
+          <div className="bp-stat">
+            <div className="num" style={{ color: data.total_risks > 0 ? '#fbbf24' : '#f5f3f0' }}>
+              {data.total_risks}
+            </div>
+            <div className="lbl">risks</div>
+          </div>
+          <div className="bp-stat">
+            <button className="btn" onClick={onReset} style={{ marginTop: 8 }}>
+              <X size={14} strokeWidth={1.5} /> new project
+            </button>
+          </div>
+        </div>
+      </div>
 
-  useEffect(() => {
-    if (!nodes.length || !containerRef.current) return
+      <div className="section-h">
+        <h3>The Modules</h3>
+        <span className="count">— {data.cards?.length || 0} discovered by graphsage —</span>
+        <div className="line"></div>
+      </div>
 
-    const container = containerRef.current
-    const width = container.clientWidth
-    const height = container.clientHeight
+      <div className="card-grid">
+        {data.cards?.map((card, i) => {
+          const accent = colorForModule(card.module_id)
+          const sev = topRiskSeverity(card.risks)
+          const sevConfig = sev ? SEVERITY[sev] : null
 
-    // clear previous
-    d3.select(container).selectAll('svg').remove()
+          return (
+            <div
+              key={card.module_id}
+              className="card"
+              style={{
+                '--accent': accent,
+                '--risk-color': sevConfig?.color,
+                '--risk-bg': sevConfig?.bg,
+                '--risk-border': sevConfig?.border,
+              }}
+              onClick={() => onSelectCard(card)}
+            >
+              {sev && (
+                <div className="card-risk-pill">
+                  <AlertTriangle size={9} strokeWidth={2} />
+                  {sevConfig.label}
+                </div>
+              )}
+              <div className="card-num" style={{ color: accent }}>
+                №{String(card.module_id + 1).padStart(2, '0')}
+              </div>
+              <div className="card-title">{card.name}</div>
+              <div className="card-summary">{card.summary || 'A coherent group of code entities discovered by graph topology.'}</div>
+              <div className="card-meta">
+                <span><span className="num">{card.node_count}</span> entities</span>
+                <span><span className="num">{card.file_count}</span> files</span>
+                {card.connects_to?.length > 0 && (
+                  <span><span className="num">{card.connects_to.length}</span> connections</span>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </>
+  )
+}
 
-    const svg = d3.select(container)
-      .append('svg')
-      .attr('width', width)
-      .attr('height', height)
-      .attr('class', 'graph-canvas')
 
-    const g = svg.append('g')
+function CardDetail({ card, analysisId, allCards, onClose, onSelectOther }) {
+  const [intent, setIntent] = useState('')
+  const [improving, setImproving] = useState(false)
+  const [improvement, setImprovement] = useState(null)
+  const [copied, setCopied] = useState(false)
+  const accent = colorForModule(card.module_id)
 
-    // zoom
-    const zoom = d3.zoom()
-      .scaleExtent([0.15, 5])
-      .on('zoom', (e) => g.attr('transform', e.transform))
-    svg.call(zoom)
-
-    // build lookup
-    const nodeMap = new Map(nodes.map(n => [n.id, { ...n }]))
-    const simNodes = Array.from(nodeMap.values())
-    const simEdges = edges
-      .filter(e => nodeMap.has(e.source) && nodeMap.has(e.target))
-      .map(e => ({ ...e }))
-
-    // simulation
-    const sim = d3.forceSimulation(simNodes)
-      .force('link', d3.forceLink(simEdges).id(d => d.id).distance(80).strength(0.3))
-      .force('charge', d3.forceManyBody().strength(-200))
-      .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collision', d3.forceCollide().radius(18))
-      .force('x', d3.forceX(width / 2).strength(0.03))
-      .force('y', d3.forceY(height / 2).strength(0.03))
-
-    simRef.current = sim
-
-    // module grouping force
-    if (modules.length > 0) {
-      const moduleCenter = {}
-      const angle = (2 * Math.PI) / modules.length
-      modules.forEach((m, i) => {
-        moduleCenter[m.id] = {
-          x: width / 2 + Math.cos(angle * i) * 200,
-          y: height / 2 + Math.sin(angle * i) * 200,
-        }
+  const handleImprove = async () => {
+    if (!intent.trim()) return
+    setImproving(true)
+    setImprovement(null)
+    try {
+      const res = await fetch('/api/improve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_id: analysisId,
+          module_id: card.module_id,
+          user_intent: intent,
+        }),
       })
-      sim.force('module', d3.forceX(d => moduleCenter[d.moduleId]?.x || width / 2).strength(0.08))
-      sim.force('moduleY', d3.forceY(d => moduleCenter[d.moduleId]?.y || height / 2).strength(0.08))
+      setImprovement(await res.json())
+    } catch (e) { console.error(e) }
+    setImproving(false)
+  }
+
+  const handleCopy = () => {
+    if (improvement?.generated_prompt) {
+      navigator.clipboard.writeText(improvement.generated_prompt)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
     }
+  }
 
-    // edges
-    const link = g.append('g')
-      .selectAll('line')
-      .data(simEdges)
-      .join('line')
-      .attr('stroke', '#1e1e2a')
-      .attr('stroke-width', d => 0.5 + (d.weight || 1) * 0.8)
-      .attr('stroke-opacity', 0.4)
+  return (
+    <div className="detail-overlay" onClick={(e) => e.target.classList.contains('detail-overlay') && onClose()}>
+      <div className="detail-card" style={{ '--accent': accent }}>
+        <button className="detail-close" onClick={onClose}><X size={16} strokeWidth={1.5} /></button>
 
-    // nodes
-    const node = g.append('g')
-      .selectAll('g')
-      .data(simNodes)
-      .join('g')
-      .attr('cursor', 'pointer')
-      .call(d3.drag()
-        .on('start', (e, d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y })
-        .on('drag', (e, d) => { d.fx = e.x; d.fy = e.y })
-        .on('end', (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx = null; d.fy = null })
-      )
+        <div className="detail-num">№{String(card.module_id + 1).padStart(2, '0')} · module</div>
+        <h2 className="detail-title">{card.name}</h2>
+        <p className="detail-summary">{card.summary}</p>
 
-    // shape per kind
-    node.append('path')
-      .attr('d', d => {
-        const sym = d3.symbol().type(KIND_SHAPE[d.kind] || d3.symbolCircle).size(140)
-        return sym()
-      })
-      .attr('fill', d => MODULE_COLORS[d.moduleId % MODULE_COLORS.length] || '#52525b')
-      .attr('fill-opacity', 0.85)
-      .attr('stroke', '#0a0a0f')
-      .attr('stroke-width', 1.5)
+        {card.responsibility && (
+          <div className="detail-section">
+            <h4>What it does</h4>
+            <p>{card.responsibility}</p>
+          </div>
+        )}
 
-    // label
-    node.append('text')
-      .text(d => d.name?.length > 18 ? d.name.slice(0, 16) + '…' : d.name)
-      .attr('x', 10)
-      .attr('y', 3)
-      .attr('fill', '#71717a')
-      .attr('font-size', '9px')
-      .attr('font-family', "'JetBrains Mono', monospace")
-      .attr('pointer-events', 'none')
+        {card.connects_to?.length > 0 && (
+          <div className="detail-section">
+            <h4>Connections to other modules</h4>
+            <div className="connections-list">
+              {card.connects_to.map(conn => {
+                const other = allCards.find(c => c.module_id === conn.module_id)
+                return (
+                  <div
+                    key={conn.module_id}
+                    className="connection"
+                    onClick={() => other && onSelectOther(other)}
+                  >
+                    <span className="connection-name">
+                      <ArrowRight size={14} strokeWidth={1.5} style={{ color: colorForModule(conn.module_id) }} />
+                      {conn.name}
+                    </span>
+                    <span className="connection-strength">{conn.strength} edges</span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
-    // interactions
-    node.on('click', (e, d) => {
-      e.stopPropagation()
-      onSelectNode(d)
-    })
+        {card.risks?.length > 0 && (
+          <div className="detail-section">
+            <h4>Issues found ({card.risks.length})</h4>
+            <div className="risk-list">
+              {card.risks.slice(0, 5).map((risk, i) => {
+                const sev = SEVERITY[risk.severity] || SEVERITY.low
+                return (
+                  <div
+                    key={i}
+                    className="risk-item"
+                    style={{
+                      '--risk-color': sev.color,
+                      '--risk-bg': sev.bg,
+                      '--risk-border': sev.border,
+                    }}
+                  >
+                    <div className="risk-head">
+                      <div className="risk-title">{risk.title}</div>
+                      <div className="risk-sev">{sev.label}</div>
+                    </div>
+                    <div className="risk-explain">{risk.explanation}</div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
-    node.on('mouseenter', function (e, d) {
-      d3.select(this).select('path')
-        .transition().duration(100)
-        .attr('d', d3.symbol().type(KIND_SHAPE[d.kind] || d3.symbolCircle).size(280)())
+        <div className="detail-section">
+          <h4>Files in this module</h4>
+          <div className="file-list">
+            {card.files?.slice(0, 12).map((f, i) => (
+              <div key={i} className="file">
+                <FileCode size={12} strokeWidth={1.5} />
+                {f}
+              </div>
+            ))}
+          </div>
+        </div>
 
-      link.attr('stroke-opacity', l =>
-        l.source.id === d.id || l.target.id === d.id ? 0.8 : 0.06
-      ).attr('stroke', l =>
-        l.source.id === d.id || l.target.id === d.id ? '#6366f1' : '#1e1e2a'
-      )
+        <div className="detail-section">
+          <h4>What if I want to change this?</h4>
+          <p style={{ marginBottom: 16 }}>
+            Describe a change in plain English. Cartograph will use its impact prediction model to figure out
+            what else might break, then generate a precise prompt you can paste into Cursor or Claude.
+          </p>
+          <div className="improve-form">
+            <input
+              type="text"
+              placeholder='e.g., "add a search bar" or "let users filter by category"'
+              value={intent}
+              onChange={(e) => setIntent(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleImprove()}
+            />
+            <button className="btn primary" onClick={handleImprove} disabled={improving || !intent.trim()}>
+              {improving ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} strokeWidth={1.5} />}
+              {improving ? 'Analyzing...' : 'Generate modification plan'}
+            </button>
+          </div>
 
-      onTooltip({ name: d.name, kind: d.kind, filePath: d.filePath, x: e.clientX, y: e.clientY })
-    })
+          {improvement && (
+            <div className="prompt-result">
+              <div className="prompt-summary">{improvement.summary}</div>
 
-    node.on('mouseleave', function (e, d) {
-      d3.select(this).select('path')
-        .transition().duration(100)
-        .attr('d', d3.symbol().type(KIND_SHAPE[d.kind] || d3.symbolCircle).size(140)())
+              {improvement.affected_modules?.length > 0 && (
+                <div className="prompt-cascade">
+                  <h4 style={{ marginBottom: 8 }}>predicted cascade (gat impact)</h4>
+                  {improvement.affected_modules.slice(0, 5).map(m => {
+                    const probColor = m.probability >= 0.7 ? '#dc2626'
+                      : m.probability >= 0.4 ? '#fbbf24' : '#737373'
+                    return (
+                      <div key={m.module_id} className="cascade-item" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span className="cascade-name">{m.name}</span>
+                          <span className="cascade-prob" style={{ '--prob-color': probColor, color: probColor }}>
+                            {(m.probability * 100).toFixed(0)}%
+                          </span>
+                        </div>
+                        <div className="cascade-bar" style={{
+                          '--prob-color': probColor,
+                          background: probColor,
+                          width: `${m.probability * 100}%`,
+                        }} />
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
 
-      link.attr('stroke-opacity', 0.4).attr('stroke', '#1e1e2a')
-      onTooltip(null)
-    })
-
-    svg.on('click', () => { onSelectNode(null); onTooltip(null) })
-
-    // tick
-    sim.on('tick', () => {
-      link
-        .attr('x1', d => d.source.x)
-        .attr('y1', d => d.source.y)
-        .attr('x2', d => d.target.x)
-        .attr('y2', d => d.target.y)
-      node.attr('transform', d => `translate(${d.x},${d.y})`)
-    })
-
-    return () => sim.stop()
-  }, [nodes, edges, modules])
-
-  // update visual state when selection/highlighting changes
-  useEffect(() => {
-    if (!containerRef.current) return
-    const svg = d3.select(containerRef.current).select('svg')
-    if (svg.empty()) return
-
-    svg.selectAll('g g g').each(function (d) {
-      const el = d3.select(this)
-      const path = el.select('path')
-
-      let opacity = 0.85
-      let strokeColor = '#0a0a0f'
-      let strokeWidth = 1.5
-
-      // dim nodes not in selected module
-      if (selectedModule !== null && d.moduleId !== selectedModule) {
-        opacity = 0.15
-      }
-
-      // highlight impact nodes
-      if (highlightedNodes.size > 0) {
-        if (highlightedNodes.has(d.id)) {
-          strokeColor = '#ef4444'
-          strokeWidth = 3
-          opacity = 1
-        } else if (d.id === impactSource) {
-          strokeColor = '#6366f1'
-          strokeWidth = 3
-          opacity = 1
-        } else {
-          opacity = 0.12
-        }
-      }
-
-      // selected node
-      if (selectedNode?.id === d.id) {
-        strokeColor = '#ffffff'
-        strokeWidth = 2.5
-        opacity = 1
-      }
-
-      path.transition().duration(150)
-        .attr('fill-opacity', opacity)
-        .attr('stroke', strokeColor)
-        .attr('stroke-width', strokeWidth)
-
-      el.select('text').transition().duration(150)
-        .attr('fill-opacity', opacity < 0.3 ? 0.15 : 1)
-    })
-  }, [selectedModule, selectedNode, highlightedNodes, impactSource])
-
-  return <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
-})
+              <div className="prompt-box">
+                <button className="copy-btn" onClick={handleCopy}>
+                  {copied ? <Check size={11} strokeWidth={2} /> : <Copy size={11} strokeWidth={1.5} />}
+                  {copied ? 'copied' : 'copy'}
+                </button>
+                {improvement.generated_prompt}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
